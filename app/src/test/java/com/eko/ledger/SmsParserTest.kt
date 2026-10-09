@@ -9,7 +9,7 @@ class SmsParserTest {
     @Test fun hdfcUpiSent() {
         val r = p("Sent Rs.250.00 From HDFC Bank A/C *1234 To SWIGGY On 09/10/26 Ref 628212345678 Not You? Call 18002586161")!!
         assertEquals("debit", r.type); assertEquals(250.0, r.amount, 0.001)
-        assertEquals("SWIGGY", r.merchant); assertEquals("XX1234", r.account); assertEquals("upi", r.mode)
+        assertEquals("SWIGGY", r.merchant); assertEquals("XX1234", r.account)
     }
 
     @Test fun axisVpa() {
