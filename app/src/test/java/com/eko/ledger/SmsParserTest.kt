@@ -44,6 +44,22 @@ class SmsParserTest {
         assertNull(p("Get flat 10% cashback on your next UPI payment! Offer valid till 31 Oct"))
     }
 
+    @Test fun iciciSemicolonCredited() {
+        val r = p("ICICI Bank Acct XX281 debited for Rs 10.00 on 10-Oct-26; SWIGGY credited. UPI:528212345678. Call 18002662 for dispute. SMS BLOCK 281 to 9215676766.")!!
+        assertEquals("debit", r.type); assertEquals(10.0, r.amount, 0.001); assertEquals("SWIGGY", r.merchant)
+    }
+
+    @Test fun iciciPersonCredited() {
+        val r = p("ICICI Bank Acct XX281 debited for Rs 740.00 on 09-Oct-26; RAMESH KUMAR credited. UPI:628212345678. Call 18002662 for dispute.")!!
+        assertEquals("RAMESH KUMAR", r.merchant)
+    }
+
+    @Test fun footerNeverMerchant() {
+        val r = p("Rs 200.00 debited from A/c XX1234 on 09-10-26. Call 18001234 to dispute. -Bank")!!
+        assertFalse(r.merchant.equals("dispute", true))
+        assertTrue(SmsParser.isJunkMerchant("dispute"))
+    }
+
     @Test fun sameSmsSameId() {
         assertEquals(SmsParser.idFor("Rs 5 debited  from a/c"), SmsParser.idFor("Rs 5 debited from a/c"))
     }

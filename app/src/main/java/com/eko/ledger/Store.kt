@@ -111,6 +111,26 @@ object Store {
             .apply()
     }
 
+    /**
+     * One-time repair: re-read the merchant for SMS entries the old parser got wrong
+     * (e.g. "dispute"). Changed rows are re-sent to the Sheet as updates.
+     */
+    @Synchronized
+    fun repairMerchants(ctx: Context) {
+        val key = "repair_merchant_v1"
+        if (prefs(ctx).getBoolean(key, false)) return
+        var changed = false
+        val fixed = all(ctx).map { t ->
+            if (t.sms.isBlank() || !(t.merchant.isBlank() || SmsParser.isJunkMerchant(t.merchant))) return@map t
+            val p = SmsParser.parse(t.sms) ?: return@map t
+            if (p.merchant == t.merchant) return@map t
+            changed = true
+            t.copy(merchant = p.merchant, ref = t.ref.ifBlank { p.ref }, synced = false, dirty = t.synced || t.dirty)
+        }
+        if (changed) write(ctx, fixed)
+        prefs(ctx).edit().putBoolean(key, true).apply()
+    }
+
     /** Undo a delete: bring the row back and make sure the Sheet has it again. */
     @Synchronized
     fun restore(ctx: Context, tx: Tx) {

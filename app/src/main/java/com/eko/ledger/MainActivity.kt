@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.SnackbarDuration
@@ -38,7 +39,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // App is always dark → light status/nav icons on a transparent bar.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         Store.prefs(this).registerOnSharedPreferenceChangeListener(listener)
         setContent { LedgerTheme { App() } }
     }
@@ -47,7 +52,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         resumed++
         // Catch anything the receiver missed (phone off, app killed), then push to the Sheet.
-        lifecycleScope.launch(Dispatchers.IO) { Ingest.scanInbox(this@MainActivity, 3) }
+        lifecycleScope.launch(Dispatchers.IO) {
+            Store.repairMerchants(this@MainActivity)
+            Ingest.scanInbox(this@MainActivity, 3)
+        }
         SyncWorker.enqueue(this)
     }
 

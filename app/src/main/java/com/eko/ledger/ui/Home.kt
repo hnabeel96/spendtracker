@@ -233,7 +233,8 @@ private fun SwipeRow(tx: Tx, onOpen: (Tx) -> Unit, onDelete: (Tx) -> Unit) {
         state = state,
         enableDismissFromStartToEnd = false,
         backgroundContent = {
-            Box(
+            // Only draw the red layer while actually swiping, so it never shows through the glass card.
+            if (state.dismissDirection == SwipeToDismissBoxValue.EndToStart) Box(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)).background(C.Coral.copy(alpha = 0.22f)).padding(end = 22.dp),
                 contentAlignment = Alignment.CenterEnd,
             ) {
@@ -244,7 +245,9 @@ private fun SwipeRow(tx: Tx, onOpen: (Tx) -> Unit, onDelete: (Tx) -> Unit) {
                 }
             }
         },
-    ) { TxRow(tx, onOpen) }
+    ) {
+        Box(Modifier.clip(RoundedCornerShape(18.dp)).background(C.Ink)) { TxRow(tx, onOpen) }
+    }
 }
 
 @Composable

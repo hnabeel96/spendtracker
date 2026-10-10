@@ -49,9 +49,17 @@ object SmsParser {
         Regex("""ending\s*(?:with|in)?\s*[x*]*\s*(\d{4})""", RegexOption.IGNORE_CASE),
         Regex("""(?:a/?c|acct|account)\s*(?:no\.?)?\s*(\d{4})\b""", RegexOption.IGNORE_CASE),
     )
-    private val REF = Regex("""(?:upi\s*ref(?:erence)?(?:\s*no)?|ref(?:erence)?\s*(?:no|number|#|id)?|utr(?:\s*no)?|txn\s*(?:id|no)|rrn)[\s.:#-]*([a-z0-9]{6,})""", RegexOption.IGNORE_CASE)
+    private val REF = Regex("""(?:upi\s*:|upi\s*ref(?:erence)?(?:\s*no)?|ref(?:erence)?\s*(?:no|number|#|id)?|utr(?:\s*no)?|txn\s*(?:id|no)|rrn)[\s.:#-]*([a-z0-9]{6,})""", RegexOption.IGNORE_CASE)
 
-    private val JUNK_MERCHANT = Regex("""^(your|the|a/?c|ac|acct|account|card|bank|you|self|xx|\*|ending|upi|rs|inr)\b""", RegexOption.IGNORE_CASE)
+    private val JUNK_MERCHANT = Regex("""^(your|the|a/?c|ac|acct|account|card|bank|you|self|xx|\*|ending|upi|rs|inr|dispute|disputes|report|reporting|block|blocking|help|queries|query|assistance|support|more|details|info|fraud|complaint|any|customer|care)\b""", RegexOption.IGNORE_CASE)
+
+    /** Words the parser has wrongly used as a merchant before — used to repair old entries. */
+    fun isJunkMerchant(m: String) = m.isNotBlank() && JUNK_MERCHANT.containsMatchIn(m.trim())
+
+    // ICICI: "Acct XX123 debited for Rs 10.00 on 10-Oct-26; SWIGGY credited."
+    private val SEMI_CREDITED = Regex(""";\s*([a-z0-9&@'*_\-/. ]{2,40}?)\s+credited\b""", RegexOption.IGNORE_CASE)
+    // Footer boilerplate after the real content: "Call 1800… for dispute", "Not you?", "SMS BLOCK…"
+    private val FOOTER = Regex("""\b(call\s|not\s+you|if\s+not|not\s+done|sms\s+block|to\s+report|report\s+fraud|for\s+dispute|to\s+dispute|for\s+queries|dial\s)""", RegexOption.IGNORE_CASE)
 
     fun parse(body: String): Parsed? {
         val text = body.replace(Regex("""\s+"""), " ").trim()
@@ -89,7 +97,12 @@ object SmsParser {
         )
     }
 
-    private fun merchant(text: String, type: String): String {
+    private fun merchant(full: String, type: String): String {
+        if (type == "debit") SEMI_CREDITED.find(full)?.let { m ->
+            val n = clean(m.groupValues[1]); if (n.length >= 2 && !JUNK_MERCHANT.containsMatchIn(n)) return n
+        }
+        // Ignore the footer so "for dispute" / "to report" never become the merchant.
+        val text = FOOTER.find(full)?.let { full.substring(0, it.range.first) } ?: full
         val vpa = VPA.find(text)?.groupValues?.get(1)
         val dirWord = if (type == "debit") "to" else "(?:from|by)"
         Regex("""\b$dirWord\s+(?:vpa\s+)?([a-z0-9.\-_]{2,}@[a-z]{2,})""", RegexOption.IGNORE_CASE)
