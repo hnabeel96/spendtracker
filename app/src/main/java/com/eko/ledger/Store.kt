@@ -31,6 +31,38 @@ object Store {
         e.apply()
     }
 
+    // ---- categories (user-defined, any name) ----
+    private val DEFAULT_CATEGORIES = listOf(
+        "Food", "Groceries", "Transport", "Shopping", "Bills", "Rent",
+        "Health", "Entertainment", "Travel", "Salary", "Transfer", "Other",
+    )
+
+    fun categories(ctx: Context): List<String> {
+        val raw = prefs(ctx).getString("categories", null) ?: return DEFAULT_CATEGORIES
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { arr.getString(it) }.filter { it.isNotBlank() }
+        } catch (_: Exception) { DEFAULT_CATEGORIES }
+    }
+
+    private fun saveCategories(ctx: Context, list: List<String>) =
+        prefs(ctx).edit().putString("categories", JSONArray(list).toString()).apply()
+
+    /** Adds a category (case-insensitive de-dupe). Returns the stored name. */
+    @Synchronized
+    fun addCategory(ctx: Context, name: String): String {
+        val n = name.trim().replace(Regex("""\s+"""), " ")
+        if (n.isEmpty()) return n
+        val cur = categories(ctx)
+        cur.firstOrNull { it.equals(n, ignoreCase = true) }?.let { return it }
+        saveCategories(ctx, cur + n)
+        return n
+    }
+
+    /** Removes from the picker only — past entries keep their category. */
+    @Synchronized
+    fun removeCategory(ctx: Context, name: String) = saveCategories(ctx, categories(ctx) - name)
+
     // ---- transactions ----
     @Synchronized
     fun all(ctx: Context): List<Tx> {
@@ -77,6 +109,17 @@ object Store {
             .putStringSet("deleted_ids", dels)
             .putStringSet(KEY_DELETES, pending)
             .apply()
+    }
+
+    /** Undo a delete: bring the row back and make sure the Sheet has it again. */
+    @Synchronized
+    fun restore(ctx: Context, tx: Tx) {
+        prefs(ctx).edit()
+            .putStringSet("deleted_ids", deletedIds(ctx) - tx.id)
+            .putStringSet(KEY_DELETES, pendingDeletes(ctx) - tx.id)
+            .apply()
+        // dirty=true → sent as an "update": overwrites the row if it still exists, re-inserts it if not.
+        write(ctx, all(ctx).filter { it.id != tx.id } + tx.copy(synced = false, dirty = true))
     }
 
     fun deletedIds(ctx: Context): Set<String> = prefs(ctx).getStringSet("deleted_ids", emptySet())!!.toSet()

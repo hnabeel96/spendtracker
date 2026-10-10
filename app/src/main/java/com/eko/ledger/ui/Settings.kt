@@ -6,6 +6,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     url0: String, token0: String, name0: String,
@@ -22,8 +28,12 @@ fun SettingsScreen(
     onTest: (String, String) -> Unit,
     onImport: () -> Unit,
     onSync: () -> Unit,
+    categories: List<String>,
+    onAddCategory: (String) -> Unit,
+    onRemoveCategory: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    var newCat by remember { mutableStateOf("") }
     var url by remember { mutableStateOf(url0) }
     var token by remember { mutableStateOf(token0) }
     var name by remember { mutableStateOf(name0) }
@@ -51,6 +61,31 @@ fun SettingsScreen(
                         OutlinedButton(enabled = !busy, onClick = { onSave(url, token, name); onTest(url, token) }) { Text("Test connection") }
                     }
                     if (status.isNotEmpty()) Text(status, color = C.Muted, fontSize = 13.sp)
+                }
+            }
+
+            GlassCard(Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Categories", color = C.Text, fontSize = 16.sp)
+                    Text("Add any category you like. Removing one only hides it from the picker — past entries keep it.",
+                        color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        categories.forEach { c ->
+                            InputChip(
+                                selected = false, onClick = { onRemoveCategory(c) }, label = { Text(c) },
+                                trailingIcon = { Icon(Icons.Default.Close, "Remove $c", Modifier.size(16.dp)) },
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            newCat, { newCat = it }, label = { Text("New category") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { onAddCategory(newCat); newCat = "" }),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(enabled = newCat.isNotBlank(), onClick = { onAddCategory(newCat); newCat = "" }) { Text("Add", color = C.Mint) }
+                    }
                 }
             }
 

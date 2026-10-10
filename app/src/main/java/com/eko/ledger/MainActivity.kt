@@ -16,6 +16,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -68,6 +71,19 @@ class MainActivity : ComponentActivity() {
         var adding by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
+        val snackbar = remember { SnackbarHostState() }
+        val scope = rememberCoroutineScope()
+        val categories = remember(version) { Store.categories(ctx) }
+
+        fun deleteWithUndo(tx: Tx) {
+            Store.delete(ctx, tx.id); SyncWorker.enqueue(ctx)
+            scope.launch {
+                snackbar.currentSnackbarData?.dismiss()
+                val r = snackbar.showSnackbar("Deleted ${Money.fmt(tx.amount)}${if (tx.merchant.isNotBlank()) " · " + tx.merchant else ""}",
+                    actionLabel = "Undo", duration = SnackbarDuration.Short)
+                if (r == SnackbarResult.ActionPerformed) { Store.restore(ctx, tx); SyncWorker.enqueue(ctx) }
+            }
+        }
 
         val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             resumed++
@@ -80,7 +96,10 @@ class MainActivity : ComponentActivity() {
 
         // Ask once on first launch.
         LaunchedEffect(Unit) {
-            if (!granted(Manifest.permission.RECEIVE_SMS)) perms.launch(smsPerms)
+            if (!granted(Manifest.permission.RECEIVE_SMS)) {
+                Store.prefs(ctx).edit().putBoolean("asked_sms", true).apply()
+                perms.launch(smsPerms)
+            }
         }
 
         val txs = remember(version) { Store.all(ctx) }
@@ -89,8 +108,17 @@ class MainActivity : ComponentActivity() {
 
         val fixes = buildList {
             if (!granted(Manifest.permission.RECEIVE_SMS) || !granted(Manifest.permission.READ_SMS)) add(Fix(
-                "Allow SMS access", "So bank debits and credits log themselves. Messages never leave the phone except the parsed rows.",
-                "Allow") { perms.launch(smsPerms) })
+                "Allow SMS access", "So bank SMS log themselves. If Android blocks it: App info → ⋮ → Allow restricted settings → Permissions → SMS.",
+                "Allow") {
+                val p = Store.prefs(ctx)
+                if (p.getBoolean("asked_sms", false)) {
+                    // Android blocks SMS for sideloaded apps: send the user to App info → ⋮ → Allow restricted settings.
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                } else {
+                    p.edit().putBoolean("asked_sms", true).apply()
+                    perms.launch(smsPerms)
+                }
+            })
             val pm = getSystemService(PowerManager::class.java)
             if (!pm.isIgnoringBatteryOptimizations(packageName)) add(Fix(
                 "Keep auto-logging alive", "Some phones stop apps in the background. Exempt Ledger from battery optimisation.",
@@ -130,6 +158,9 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onSync = { SyncWorker.enqueue(ctx); status = "Sync queued." },
+                categories = categories,
+                onAddCategory = { Store.addCategory(ctx, it) },
+                onRemoveCategory = { Store.removeCategory(ctx, it) },
                 onBack = { screen = "home" },
             )
             else -> HomeScreen(
@@ -139,6 +170,8 @@ class MainActivity : ComponentActivity() {
                 onSettings = { status = ""; screen = "settings" },
                 onAdd = { adding = true },
                 onOpen = { editing = it },
+                onDelete = { deleteWithUndo(it) },
+                snackbar = snackbar,
             )
         }
 
@@ -146,11 +179,13 @@ class MainActivity : ComponentActivity() {
             TxDialog(
                 initial = editing,
                 paidBy = Store.name(ctx),
+                categories = categories,
+                onAddCategory = { Store.addCategory(ctx, it) },
                 onSave = { tx ->
                     if (editing == null) Store.add(ctx, listOf(tx)) else Store.update(ctx, tx)
                     SyncWorker.enqueue(ctx); adding = false; editing = null
                 },
-                onDelete = { tx -> Store.delete(ctx, tx.id); SyncWorker.enqueue(ctx); editing = null },
+                onDelete = { tx -> editing = null; deleteWithUndo(tx) },
                 onDismiss = { adding = false; editing = null },
             )
         }
