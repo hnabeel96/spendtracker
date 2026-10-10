@@ -7,6 +7,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
@@ -31,9 +36,26 @@ fun SettingsScreen(
     categories: List<String>,
     onAddCategory: (String) -> Unit,
     onRemoveCategory: (String) -> Unit,
+    subcategories: Map<String, List<String>>,
+    onAddSubcategory: (String, String) -> Unit,
+    onRemoveSubcategory: (String, String) -> Unit,
+    onResendAll: () -> Unit,
     onBack: () -> Unit,
 ) {
     var newCat by remember { mutableStateOf("") }
+    var newSub by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf<String?>(null) }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
+
+    confirmRemove?.let { c ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null }, containerColor = C.Ink2,
+            title = { Text("Remove “$c”?", color = C.Text) },
+            text = { Text("It disappears from the pickers. Entries already tagged $c keep it.", color = C.Muted) },
+            confirmButton = { TextButton(onClick = { onRemoveCategory(c); confirmRemove = null }) { Text("Remove", color = C.Coral) } },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel", color = C.Muted) } },
+        )
+    }
     var url by remember { mutableStateOf(url0) }
     var token by remember { mutableStateOf(token0) }
     var name by remember { mutableStateOf(name0) }
@@ -66,15 +88,46 @@ fun SettingsScreen(
 
             GlassCard(Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Categories", color = C.Text, fontSize = 16.sp)
-                    Text("Add any category you like. Removing one only hides it from the picker — past entries keep it.",
+                    Text("Categories & subcategories", color = C.Text, fontSize = 16.sp)
+                    Text("Tap a category to see and add its subcategories. Removing only hides it from pickers — past entries keep it.",
                         color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        categories.forEach { c ->
-                            InputChip(
-                                selected = false, onClick = { onRemoveCategory(c) }, label = { Text(c) },
-                                trailingIcon = { Icon(Icons.Default.Close, "Remove $c", Modifier.size(16.dp)) },
-                            )
+                    categories.forEach { c ->
+                        val open = expanded == c
+                        val subs = subcategories[c].orEmpty()
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.Glass)) {
+                            Row(
+                                Modifier.fillMaxWidth().clickable { expanded = if (open) null else c; newSub = "" }
+                                    .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(c, color = C.Text, fontSize = 15.sp)
+                                if (subs.isNotEmpty()) Text("  · ${subs.size} sub", color = C.Faint, fontSize = 12.sp)
+                                Spacer(Modifier.weight(1f))
+                                Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = C.Muted)
+                                IconButton(onClick = { confirmRemove = c }) { Icon(Icons.Default.Close, "Remove $c", tint = C.Faint, modifier = Modifier.size(18.dp)) }
+                            }
+                            if (open) Column(Modifier.padding(start = 14.dp, end = 10.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    subs.forEach { sc ->
+                                        InputChip(
+                                            selected = false, onClick = {}, label = { Text(sc) },
+                                            trailingIcon = {
+                                                Icon(Icons.Default.Close, "Remove $sc",
+                                                    Modifier.size(16.dp).clickable { onRemoveSubcategory(c, sc) })
+                                            },
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(
+                                        newSub, { newSub = it }, label = { Text("New subcategory in $c") }, singleLine = true,
+                                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { onAddSubcategory(c, newSub); newSub = "" }),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(enabled = newSub.isNotBlank(), onClick = { onAddSubcategory(c, newSub); newSub = "" }) { Text("Add", color = C.Mint) }
+                                }
+                            }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,6 +150,7 @@ fun SettingsScreen(
                         OutlinedButton(onClick = onSync) { Text("Sync now") }
                         OutlinedButton(enabled = !busy, onClick = onImport) { Text("Import last 30 days") }
                     }
+                    OutlinedButton(onClick = onResendAll) { Text("Re-send all to Sheet") }
                     Text(
                         "Import reads bank SMS already in your inbox. Duplicates are skipped, so it's safe to run any time.",
                         color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp,

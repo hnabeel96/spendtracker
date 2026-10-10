@@ -8,7 +8,8 @@ data class Tx(
     val ts: Long,
     val amount: Double,
     val type: String,            // "debit" | "credit"
-    val category: String = "",   // left blank for now — to be filled later
+    val category: String = "",
+    val subcategory: String = "",
     val merchant: String = "",
     val account: String = "",
     val ref: String = "",
@@ -24,7 +25,7 @@ data class Tx(
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("ts", ts).put("amount", amount).put("type", type)
-        .put("category", category).put("merchant", merchant).put("account", account)
+        .put("category", category).put("subcategory", subcategory).put("merchant", merchant).put("account", account)
         .put("ref", ref).put("note", note).put("mode", mode).put("paid_by", paidBy)
         .put("source", source).put("sms", sms).put("synced", synced).put("dirty", dirty)
 
@@ -42,6 +43,7 @@ data class Tx(
             amount = o.optDouble("amount", 0.0),
             type = o.optString("type", "debit"),
             category = o.optString("category"),
+            subcategory = o.optString("subcategory"),
             merchant = o.optString("merchant"),
             account = o.optString("account"),
             ref = o.optString("ref"),

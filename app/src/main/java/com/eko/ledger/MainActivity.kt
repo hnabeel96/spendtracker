@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
         val snackbar = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
         val categories = remember(version) { Store.categories(ctx) }
+        val subcategories = remember(version) { Store.subcategories(ctx) }
+        var focus by remember { mutableStateOf<SubKey?>(null) }
 
         fun deleteWithUndo(tx: Tx) {
             Store.delete(ctx, tx.id); SyncWorker.enqueue(ctx)
@@ -169,6 +171,10 @@ class MainActivity : ComponentActivity() {
                 categories = categories,
                 onAddCategory = { Store.addCategory(ctx, it) },
                 onRemoveCategory = { Store.removeCategory(ctx, it) },
+                subcategories = subcategories,
+                onAddSubcategory = { c, n -> Store.addSubcategory(ctx, c, n) },
+                onRemoveSubcategory = { c, n -> Store.removeSubcategory(ctx, c, n) },
+                onResendAll = { Store.resendAll(ctx); SyncWorker.enqueue(ctx); status = "Re-sending every entry to the Sheet…" },
                 onBack = { screen = "home" },
             )
             else -> HomeScreen(
@@ -180,6 +186,9 @@ class MainActivity : ComponentActivity() {
                 onOpen = { editing = it },
                 onDelete = { deleteWithUndo(it) },
                 snackbar = snackbar,
+                subcategories = subcategories,
+                focus = focus,
+                onFocus = { focus = it },
             )
         }
 
@@ -189,6 +198,8 @@ class MainActivity : ComponentActivity() {
                 paidBy = Store.name(ctx),
                 categories = categories,
                 onAddCategory = { Store.addCategory(ctx, it) },
+                subcategories = subcategories,
+                onAddSubcategory = { c, n -> Store.addSubcategory(ctx, c, n) },
                 onSave = { tx ->
                     if (editing == null) Store.add(ctx, listOf(tx)) else Store.update(ctx, tx)
                     SyncWorker.enqueue(ctx); adding = false; editing = null

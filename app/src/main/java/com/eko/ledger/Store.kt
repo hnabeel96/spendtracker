@@ -59,6 +59,48 @@ object Store {
         return n
     }
 
+    // ---- subcategories: category -> [subcategory, ...] ----
+    fun subcategories(ctx: Context): Map<String, List<String>> {
+        val raw = prefs(ctx).getString("subcategories", null) ?: return emptyMap()
+        return try {
+            val o = org.json.JSONObject(raw)
+            o.keys().asSequence().associateWith { k ->
+                val a = o.getJSONArray(k); (0 until a.length()).map { a.getString(it) }
+            }.filterValues { it.isNotEmpty() }
+        } catch (_: Exception) { emptyMap() }
+    }
+
+    private fun saveSubs(ctx: Context, m: Map<String, List<String>>) {
+        val o = org.json.JSONObject()
+        m.filterValues { it.isNotEmpty() }.forEach { (k, v) -> o.put(k, JSONArray(v)) }
+        prefs(ctx).edit().putString("subcategories", o.toString()).apply()
+    }
+
+    @Synchronized
+    fun addSubcategory(ctx: Context, category: String, name: String): String {
+        val n = name.trim().replace(Regex("""\s+"""), " ")
+        if (n.isEmpty() || category.isBlank()) return n
+        val m = subcategories(ctx).toMutableMap()
+        val cur = m[category].orEmpty()
+        cur.firstOrNull { it.equals(n, ignoreCase = true) }?.let { return it }
+        m[category] = cur + n
+        saveSubs(ctx, m)
+        return n
+    }
+
+    @Synchronized
+    fun removeSubcategory(ctx: Context, category: String, name: String) {
+        val m = subcategories(ctx).toMutableMap()
+        m[category] = m[category].orEmpty() - name
+        saveSubs(ctx, m)
+    }
+
+    /** Re-send every entry to the Sheet (fills newly added columns like subcategory on old rows). */
+    @Synchronized
+    fun resendAll(ctx: Context) {
+        write(ctx, all(ctx).map { if (it.synced || it.dirty) it.copy(synced = false, dirty = true) else it })
+    }
+
     /** Removes from the picker only — past entries keep their category. */
     @Synchronized
     fun removeCategory(ctx: Context, name: String) = saveCategories(ctx, categories(ctx) - name)

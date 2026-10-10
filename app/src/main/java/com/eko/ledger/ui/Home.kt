@@ -12,7 +12,8 @@ import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,13 +47,19 @@ fun HomeScreen(
     onOpen: (Tx) -> Unit,
     onDelete: (Tx) -> Unit,
     snackbar: SnackbarHostState,
+    subcategories: Map<String, List<String>>,
+    focus: SubKey?,
+    onFocus: (SubKey?) -> Unit,
 ) {
     val zone = ZoneId.systemDefault()
-    val monthTxs = txs.filter { YearMonth.from(Instant.ofEpochMilli(it.ts).atZone(zone)) == month }
+    fun inMonth(t: Tx, m: YearMonth) = YearMonth.from(Instant.ofEpochMilli(t.ts).atZone(zone)) == m
+    val monthTxs = txs.filter { inMonth(it, month) }
     val out = monthTxs.filter { it.isDebit }.sumOf { it.amount }
     val inn = monthTxs.filter { !it.isDebit }.sumOf { it.amount }
-    val days = monthTxs.sortedByDescending { it.ts }
+    val listed = if (focus == null) monthTxs else monthTxs.filter { focus.matches(it) }
+    val days = listed.sortedByDescending { it.ts }
         .groupBy { Instant.ofEpochMilli(it.ts).atZone(zone).toLocalDate() }
+    var askDelete by remember { mutableStateOf<Tx?>(null) }
 
     Box(Modifier.fillMaxSize().background(Backdrop)) {
         LazyColumn(
@@ -69,10 +76,20 @@ fun HomeScreen(
             }
             item { Hero(month, onMonth, out, inn, monthTxs.size) }
             item { CategoryBreakdown(monthTxs) }
+            item {
+                SubcategoryFocus(
+                    subcategories = subcategories, monthTxs = monthTxs,
+                    prevMonthTxs = txs.filter { inMonth(it, month.minusMonths(1)) },
+                    focus = focus, onFocus = onFocus,
+                )
+            }
             item { SyncPill(pending, syncError, connected, onSync, onSettings) }
             items(fixes) { FixCard(it) }
 
-            if (days.isEmpty()) item {
+            if (days.isEmpty() && focus != null) item {
+                Text("No ${focus.sub} entries in this month.", color = C.Faint, fontSize = 14.sp,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 30.dp))
+            } else if (days.isEmpty()) item {
                 Text(
                     "Nothing logged this month yet.\nBank SMS will appear here on their own — or tap Add entry.\nTip: tap an entry to edit or set its category, swipe left to delete.",
                     color = C.Faint, fontSize = 14.sp, lineHeight = 20.sp,
@@ -81,7 +98,7 @@ fun HomeScreen(
             }
             days.forEach { (day, list) ->
                 item(key = "h$day") { DayHeader(day, list) }
-                items(list, key = { it.id }) { SwipeRow(it, onOpen, onDelete) }
+                items(list, key = { it.id }) { SwipeRow(it, onOpen) { tx -> askDelete = tx } }
             }
         }
         ExtendedFloatingActionButton(
@@ -91,6 +108,19 @@ fun HomeScreen(
             text = { Text("Add entry") },
             modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(22.dp),
         )
+        askDelete?.let { tx ->
+            AlertDialog(
+                onDismissRequest = { askDelete = null },
+                containerColor = C.Ink2,
+                title = { Text("Delete this entry?", color = C.Text) },
+                text = {
+                    Text("${Money.fmt(tx.amount)}${if (tx.merchant.isNotBlank()) " · " + tx.merchant else ""} will also be removed from your Sheet.",
+                        color = C.Muted)
+                },
+                confirmButton = { TextButton(onClick = { askDelete = null; onDelete(tx) }) { Text("Delete", color = C.Coral) } },
+                dismissButton = { TextButton(onClick = { askDelete = null }) { Text("Keep", color = C.Muted) } },
+            )
+        }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 90.dp, start = 16.dp, end = 16.dp))
     }
 }
@@ -121,6 +151,88 @@ private fun Hero(month: YearMonth, onMonth: (YearMonth) -> Unit, out: Double, in
                 Stat("In", Money.fmt(inn), C.Mint, Modifier.weight(1f))
                 Stat("Net", (if (inn - out >= 0) "+" else "−") + Money.fmt(kotlin.math.abs(inn - out)), C.Text, Modifier.weight(1f))
                 Stat("Entries", count.toString(), C.Text, Modifier.weight(0.7f))
+            }
+        }
+    }
+}
+
+/** A chosen subcategory (it belongs to one category). */
+data class SubKey(val category: String, val sub: String) {
+    fun matches(t: Tx) = t.category.equals(category, true) && t.subcategory.equals(sub, true)
+}
+
+/** Optional: pick one subcategory to see its numbers and filter the list below. */
+@Composable
+private fun SubcategoryFocus(
+    subcategories: Map<String, List<String>>,
+    monthTxs: List<Tx>,
+    prevMonthTxs: List<Tx>,
+    focus: SubKey?,
+    onFocus: (SubKey?) -> Unit,
+) {
+    // Every defined subcategory, plus any used this month that was later removed from the list.
+    val keys = (subcategories.flatMap { (c, subs) -> subs.map { SubKey(c, it) } } +
+        monthTxs.filter { it.subcategory.isNotBlank() && it.category.isNotBlank() }.map { SubKey(it.category, it.subcategory) })
+        .distinctBy { it.category.lowercase() + "\u0001" + it.sub.lowercase() }
+    val spendOf = { k: SubKey, list: List<Tx> -> list.filter { it.isDebit && k.matches(it) }.sumOf { it.amount } }
+    val sorted = keys.sortedByDescending { spendOf(it, monthTxs) }
+
+    GlassCard(Modifier.fillMaxWidth(), pad = 16.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Subcategory focus", color = C.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                if (focus != null) Text("Clear", color = C.Mint, fontSize = 13.sp, modifier = Modifier.clickable { onFocus(null) })
+            }
+            if (sorted.isEmpty()) {
+                Text("Optional. Add subcategories when you edit an entry (e.g. Food › Swiggy), then pick one here to track it.",
+                    color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+            if (sorted.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(sorted, key = { it.category + "/" + it.sub }) { k ->
+                    val sel = focus != null && focus.category.equals(k.category, true) && focus.sub.equals(k.sub, true)
+                    FilterChip(
+                        selected = sel,
+                        onClick = { onFocus(if (sel) null else k) },
+                        label = {
+                            Column(Modifier.padding(vertical = 4.dp)) {
+                                Text(k.sub, fontSize = 13.sp)
+                                Text(k.category, fontSize = 10.sp, color = C.Faint)
+                            }
+                        },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = C.Amber.copy(alpha = .22f)),
+                    )
+                }
+            }
+            if (focus != null) {
+                val spent = spendOf(focus, monthTxs)
+                val prev = spendOf(focus, prevMonthTxs)
+                val count = monthTxs.count { focus.matches(it) }
+                val catTotal = monthTxs.filter { it.isDebit && it.category.equals(focus.category, true) }.sumOf { it.amount }
+                Row {
+                    Column(Modifier.weight(1f)) {
+                        Text("Spent", color = C.Faint, fontSize = 12.sp)
+                        Text(Money.fmt(spent), color = C.Text, fontSize = 20.sp, fontWeight = FontWeight.Light)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Entries", color = C.Faint, fontSize = 12.sp)
+                        Text(count.toString(), color = C.Text, fontSize = 20.sp, fontWeight = FontWeight.Light)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Of ${focus.category}", color = C.Faint, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (catTotal > 0) "${(spent * 100 / catTotal).toInt()}%" else "—", color = C.Text, fontSize = 20.sp, fontWeight = FontWeight.Light)
+                    }
+                }
+                val diff = spent - prev
+                Text(
+                    when {
+                        prev == 0.0 -> "Nothing in ${focus.sub} last month."
+                        diff > 0 -> "▲ ${Money.fmt(diff)} more than last month (${Money.fmt(prev)})"
+                        diff < 0 -> "▼ ${Money.fmt(-diff)} less than last month (${Money.fmt(prev)})"
+                        else -> "Same as last month."
+                    },
+                    color = if (diff > 0 && prev > 0) C.Coral else C.Muted, fontSize = 12.sp,
+                )
+                Text("Showing only ${focus.category} › ${focus.sub} below.", color = C.Faint, fontSize = 12.sp)
             }
         }
     }
@@ -225,10 +337,12 @@ private fun DayHeader(day: LocalDate, list: List<Tx>) {
 
 /** Swipe left to delete. */
 @Composable
-private fun SwipeRow(tx: Tx, onOpen: (Tx) -> Unit, onDelete: (Tx) -> Unit) {
-    val state = rememberSwipeToDismissBoxState(confirmValueChange = {
-        if (it == SwipeToDismissBoxValue.EndToStart) { onDelete(tx); true } else false
-    })
+private fun SwipeRow(tx: Tx, onOpen: (Tx) -> Unit, onAskDelete: (Tx) -> Unit) {
+    // Must drag past 60% of the width, and even then it only asks — the row snaps back.
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { if (it == SwipeToDismissBoxValue.EndToStart) onAskDelete(tx); false },
+        positionalThreshold = { total -> total * 0.6f },
+    )
     SwipeToDismissBox(
         state = state,
         enableDismissFromStartToEnd = false,
@@ -274,7 +388,8 @@ private fun TxRow(tx: Tx, onOpen: (Tx) -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (tx.category.isNotBlank()) {
                         Text(
-                            tx.category, color = C.Mint, fontSize = 11.sp, maxLines = 1,
+                            if (tx.subcategory.isNotBlank()) "${tx.category} › ${tx.subcategory}" else tx.category,
+                            color = C.Mint, fontSize = 11.sp, maxLines = 1,
                             modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(C.Mint.copy(alpha = 0.12f))
                                 .padding(horizontal = 6.dp, vertical = 1.dp),
                         )

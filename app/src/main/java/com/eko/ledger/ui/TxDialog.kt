@@ -35,6 +35,8 @@ fun TxDialog(
     paidBy: String,
     categories: List<String>,
     onAddCategory: (String) -> String,
+    subcategories: Map<String, List<String>>,
+    onAddSubcategory: (String, String) -> String,
     onSave: (Tx) -> Unit,
     onDelete: (Tx) -> Unit,
     onDismiss: () -> Unit,
@@ -44,6 +46,8 @@ fun TxDialog(
     var amount by remember { mutableStateOf(initial?.amount?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "") }
     var debit by remember { mutableStateOf(initial?.isDebit ?: true) }
     var category by remember { mutableStateOf(initial?.category ?: "") }
+    var subcategory by remember { mutableStateOf(initial?.subcategory ?: "") }
+    var newSub by remember { mutableStateOf<String?>(null) }
     var merchant by remember { mutableStateOf(initial?.merchant ?: "") }
     var note by remember { mutableStateOf(initial?.note ?: "") }
     var ts by remember { mutableLongStateOf(initial?.ts ?: System.currentTimeMillis()) }
@@ -65,10 +69,21 @@ fun TxDialog(
         }.show()
     }
 
+    fun setCategory(c: String) {
+        if (!c.equals(category, true)) { subcategory = ""; newSub = null }
+        category = c
+    }
+
     fun commitNewCat() {
         val n = newCat?.trim().orEmpty()
-        if (n.isNotEmpty()) category = onAddCategory(n)
+        if (n.isNotEmpty()) setCategory(onAddCategory(n))
         newCat = null
+    }
+
+    fun commitNewSub() {
+        val n = newSub?.trim().orEmpty()
+        if (n.isNotEmpty() && category.isNotBlank()) subcategory = onAddSubcategory(category, n)
+        newSub = null
     }
 
     AlertDialog(
@@ -92,7 +107,7 @@ fun TxDialog(
                     chips.forEach { c ->
                         FilterChip(
                             selected = category.equals(c, true),
-                            onClick = { category = if (category.equals(c, true)) "" else c },
+                            onClick = { setCategory(if (category.equals(c, true)) "" else c) },
                             label = { Text(c) },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = C.Mint.copy(alpha = .25f)),
                         )
@@ -109,6 +124,37 @@ fun TxDialog(
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = { commitNewCat() }) { Text("Add", color = C.Mint) }
+                    }
+                }
+
+                // ---- subcategory (only once a category is chosen) ----
+                if (category.isNotBlank()) {
+                    val subs = (subcategories[category].orEmpty()).let {
+                        if (subcategory.isNotEmpty() && it.none { s -> s.equals(subcategory, true) }) it + subcategory else it
+                    }
+                    Text("Subcategory · $category", color = C.Muted, fontSize = 13.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        subs.forEach { sc ->
+                            FilterChip(
+                                selected = subcategory.equals(sc, true),
+                                onClick = { subcategory = if (subcategory.equals(sc, true)) "" else sc },
+                                label = { Text(sc) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = C.Amber.copy(alpha = .22f)),
+                            )
+                        }
+                        AssistChip(onClick = { newSub = "" }, label = { Text(if (subs.isEmpty()) "Add subcategory" else "New") },
+                            leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) })
+                    }
+                    if (newSub != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                newSub!!, { newSub = it }, label = { Text("New subcategory") }, singleLine = true,
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { commitNewSub() }),
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { commitNewSub() }) { Text("Add", color = C.Mint) }
+                        }
                     }
                 }
 
@@ -151,13 +197,14 @@ fun TxDialog(
         confirmButton = {
             TextButton(enabled = value != null && value > 0, onClick = {
                 if (newCat != null) commitNewCat()
+                if (newSub != null) commitNewSub()
                 val base = initial ?: Tx(
                     id = "m_" + UUID.randomUUID().toString().take(12), ts = ts,
                     amount = 0.0, type = "debit", mode = "cash", paidBy = paidBy, source = "manual",
                 )
                 onSave(base.copy(
                     amount = value!!, type = if (debit) "debit" else "credit", ts = ts,
-                    category = category, merchant = merchant.trim(), note = note.trim(),
+                    category = category, subcategory = if (category.isBlank()) "" else subcategory, merchant = merchant.trim(), note = note.trim(),
                 ))
             }) { Text("Save", color = C.Mint) }
         },

@@ -20,7 +20,8 @@ const SHEET_NAME = 'Transactions';
 // "category" is intentionally left blank by the app — fill it in later.
 const HEADERS = [
   'id', 'ts', 'amount', 'type', 'category', 'merchant', 'account',
-  'ref', 'note', 'mode', 'paid_by', 'source', 'sms', 'synced_at'
+  'ref', 'note', 'mode', 'paid_by', 'source', 'sms', 'synced_at',
+  'subcategory'
 ];
 
 function doPost(e) {
@@ -117,6 +118,13 @@ function sheet_() {
     sh.setFrozenRows(1);
     sh.getRange('B:B').setNumberFormat('yyyy-mm-dd hh:mm');
     sh.getRange('C:C').setNumberFormat('#,##0.00');
+  } else {
+    // Older sheets: add any new header columns (e.g. subcategory) at the end.
+    const width = sh.getLastColumn();
+    if (width < HEADERS.length) {
+      sh.getRange(1, width + 1, 1, HEADERS.length - width)
+        .setValues([HEADERS.slice(width)]).setFontWeight('bold');
+    }
   }
   return sh;
 }
