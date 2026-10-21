@@ -75,7 +75,7 @@ fun HomeScreen(
                 }
             }
             item { Hero(month, onMonth, out, inn, monthTxs.size) }
-            item { CategoryBreakdown(monthTxs) }
+            item { CategoryBreakdown(monthTxs, txs.filter { inMonth(it, month.minusMonths(1)) }, focus, onFocus) }
             item {
                 SubcategoryFocus(
                     subcategories = subcategories, monthTxs = monthTxs,
@@ -87,7 +87,7 @@ fun HomeScreen(
             items(fixes) { FixCard(it) }
 
             if (days.isEmpty() && focus != null) item {
-                Text("No ${focus.sub} entries in this month.", color = C.Faint, fontSize = 14.sp,
+                Text("No ${focus.label} entries in this month.", color = C.Faint, fontSize = 14.sp,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 30.dp))
             } else if (days.isEmpty()) item {
                 Text(
@@ -156,9 +156,29 @@ private fun Hero(month: YearMonth, onMonth: (YearMonth) -> Unit, out: Double, in
     }
 }
 
-/** A chosen subcategory (it belongs to one category). */
-data class SubKey(val category: String, val sub: String) {
-    fun matches(t: Tx) = t.category.equals(category, true) && t.subcategory.equals(sub, true)
+/**
+ * What the list is filtered to.
+ *  SubKey("Food", "")       → everything in Food
+ *  SubKey("Food", "Swiggy") → only Food › Swiggy
+ *  SubKey("", "")           → entries with no category
+ */
+data class SubKey(val category: String, val sub: String = "") {
+    val isCategory get() = sub.isEmpty()
+    val label get() = when {
+        category.isEmpty() -> "Uncategorised"
+        sub.isEmpty() -> category
+        else -> "$category › $sub"
+    }
+    fun matches(t: Tx) =
+        if (category.isEmpty()) t.category.isBlank()
+        else t.category.equals(category, true) && (sub.isEmpty() || t.subcategory.equals(sub, true))
+}
+
+private fun vsLastMonth(spent: Double, prev: Double, what: String) = when {
+    prev == 0.0 -> "Nothing in $what last month."
+    spent > prev -> "▲ ${Money.fmt(spent - prev)} more than last month (${Money.fmt(prev)})"
+    spent < prev -> "▼ ${Money.fmt(prev - spent)} less than last month (${Money.fmt(prev)})"
+    else -> "Same as last month."
 }
 
 /** Optional: pick one subcategory to see its numbers and filter the list below. */
@@ -174,16 +194,22 @@ private fun SubcategoryFocus(
     val keys = (subcategories.flatMap { (c, subs) -> subs.map { SubKey(c, it) } } +
         monthTxs.filter { it.subcategory.isNotBlank() && it.category.isNotBlank() }.map { SubKey(it.category, it.subcategory) })
         .distinctBy { it.category.lowercase() + "\u0001" + it.sub.lowercase() }
+        .filter { focus == null || it.category.equals(focus.category, true) }   // a picked category narrows the chips
     val spendOf = { k: SubKey, list: List<Tx> -> list.filter { it.isDebit && k.matches(it) }.sumOf { it.amount } }
     val sorted = keys.sortedByDescending { spendOf(it, monthTxs) }
+    val inCategory = focus?.category?.takeIf { it.isNotEmpty() }
 
     GlassCard(Modifier.fillMaxWidth(), pad = 16.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Subcategory focus", color = C.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(if (inCategory != null) "Subcategories in $inCategory" else "Subcategory focus",
+                    color = C.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 if (focus != null) Text("Clear", color = C.Mint, fontSize = 13.sp, modifier = Modifier.clickable { onFocus(null) })
             }
-            if (sorted.isEmpty()) {
+            if (sorted.isEmpty() && focus != null) {
+                Text(if (inCategory != null) "No subcategories in $inCategory yet — add one by tapping an entry." else "Uncategorised entries have no subcategories.",
+                    color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp)
+            } else if (sorted.isEmpty()) {
                 Text("Optional. Add subcategories when you edit an entry (e.g. Food › Swiggy), then pick one here to track it.",
                     color = C.Faint, fontSize = 12.sp, lineHeight = 16.sp)
             }
@@ -192,7 +218,8 @@ private fun SubcategoryFocus(
                     val sel = focus != null && focus.category.equals(k.category, true) && focus.sub.equals(k.sub, true)
                     FilterChip(
                         selected = sel,
-                        onClick = { onFocus(if (sel) null else k) },
+                        // Un-picking a subcategory falls back to its whole category.
+                        onClick = { onFocus(if (sel) SubKey(k.category) else k) },
                         label = {
                             Column(Modifier.padding(vertical = 4.dp)) {
                                 Text(k.sub, fontSize = 13.sp)
@@ -203,7 +230,7 @@ private fun SubcategoryFocus(
                     )
                 }
             }
-            if (focus != null) {
+            if (focus != null && !focus.isCategory) {
                 val spent = spendOf(focus, monthTxs)
                 val prev = spendOf(focus, prevMonthTxs)
                 val count = monthTxs.count { focus.matches(it) }
@@ -222,49 +249,82 @@ private fun SubcategoryFocus(
                         Text(if (catTotal > 0) "${(spent * 100 / catTotal).toInt()}%" else "—", color = C.Text, fontSize = 20.sp, fontWeight = FontWeight.Light)
                     }
                 }
-                val diff = spent - prev
-                Text(
-                    when {
-                        prev == 0.0 -> "Nothing in ${focus.sub} last month."
-                        diff > 0 -> "▲ ${Money.fmt(diff)} more than last month (${Money.fmt(prev)})"
-                        diff < 0 -> "▼ ${Money.fmt(-diff)} less than last month (${Money.fmt(prev)})"
-                        else -> "Same as last month."
-                    },
-                    color = if (diff > 0 && prev > 0) C.Coral else C.Muted, fontSize = 12.sp,
-                )
+                Text(vsLastMonth(spent, prev, focus.sub),
+                    color = if (spent > prev && prev > 0) C.Coral else C.Muted, fontSize = 12.sp)
                 Text("Showing only ${focus.category} › ${focus.sub} below.", color = C.Faint, fontSize = 12.sp)
             }
         }
     }
 }
 
-/** Where the month's money went, by category. */
+/** Where the month's money went, by category. Tap a row to see only that category's entries. */
 @Composable
-private fun CategoryBreakdown(monthTxs: List<Tx>) {
+private fun CategoryBreakdown(monthTxs: List<Tx>, prevMonthTxs: List<Tx>, focus: SubKey?, onFocus: (SubKey?) -> Unit) {
     val spends = monthTxs.filter { it.isDebit }
-    if (spends.isEmpty()) return
-    val total = spends.sumOf { it.amount }
-    val byCat = spends.groupBy { it.category.ifBlank { "Uncategorised" } }
+    if (spends.isEmpty() && focus == null) return
+    var showAll by remember { mutableStateOf(false) }
+    val total = spends.sumOf { it.amount }.takeIf { it > 0 } ?: 1.0
+    // key "" = uncategorised
+    val byCat = spends.groupBy { it.category.trim() }
         .mapValues { (_, v) -> v.sumOf { it.amount } }
-        .entries.sortedByDescending { it.value }
+        .entries.sortedByDescending { it.value }.map { it.key to it.value }
+    val focusedCat = focus?.category
+    val visible = if (showAll || byCat.size <= 6) byCat
+                  else byCat.take(6) + byCat.drop(6).filter { it.first.equals(focusedCat, true) }
+
     GlassCard(Modifier.fillMaxWidth(), pad = 16.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("By category", color = C.Muted, fontSize = 13.sp)
-            byCat.take(6).forEach { (cat, amt) ->
-                val frac = (amt / total).toFloat()
-                Column {
-                    Row {
-                        Text(cat, color = if (cat == "Uncategorised") C.Faint else C.Text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("By category", color = C.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                if (focus != null) Text("Clear", color = C.Mint, fontSize = 13.sp, modifier = Modifier.clickable { onFocus(null) })
+                else Text("Tap to filter", color = C.Faint, fontSize = 12.sp)
+            }
+            visible.forEach { (cat, amt) ->
+                val label = cat.ifEmpty { "Uncategorised" }
+                val selected = focusedCat != null && focusedCat.equals(cat, true)
+                val exact = selected && focus!!.isCategory
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) C.Mint.copy(alpha = if (exact) 0.12f else 0.06f) else Color.Transparent)
+                        .clickable { onFocus(if (exact) null else SubKey(cat)) }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, color = when { selected -> C.Mint; cat.isEmpty() -> C.Faint; else -> C.Text },
+                            fontSize = 14.sp, modifier = Modifier.weight(1f))
                         Text(Money.fmt(amt), color = C.Text, fontSize = 14.sp)
+                        Icon(Icons.Default.ChevronRight, null, tint = if (selected) C.Mint else C.Faint, modifier = Modifier.size(18.dp))
                     }
                     Spacer(Modifier.height(4.dp))
                     Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x14FFFFFF))) {
-                        Box(Modifier.fillMaxWidth(frac).fillMaxHeight().clip(RoundedCornerShape(2.dp))
-                            .background(if (cat == "Uncategorised") C.Faint else C.Coral))
+                        Box(Modifier.fillMaxWidth((amt / total).toFloat()).fillMaxHeight().clip(RoundedCornerShape(2.dp))
+                            .background(when { selected -> C.Mint; cat.isEmpty() -> C.Faint; else -> C.Coral }))
                     }
                 }
             }
-            if (byCat.size > 6) Text("+${byCat.size - 6} more", color = C.Faint, fontSize = 12.sp)
+            if (byCat.size > 6) Text(
+                if (showAll) "Show less" else "Show all ${byCat.size}",
+                color = C.Mint, fontSize = 12.sp,
+                modifier = Modifier.clickable { showAll = !showAll }.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+
+            // Summary for a picked category
+            if (focus != null && focus.isCategory) {
+                val k = focus
+                val spent = monthTxs.filter { it.isDebit && k.matches(it) }.sumOf { it.amount }
+                val received = monthTxs.filter { !it.isDebit && k.matches(it) }.sumOf { it.amount }
+                val prev = prevMonthTxs.filter { it.isDebit && k.matches(it) }.sumOf { it.amount }
+                val count = monthTxs.count { k.matches(it) }
+                Spacer(Modifier.height(4.dp))
+                Row {
+                    Stat("Spent", Money.fmt(spent), C.Text, Modifier.weight(1f))
+                    Stat("Entries", count.toString(), C.Text, Modifier.weight(0.7f))
+                    Stat("Share", if (spends.isNotEmpty()) "${(spent * 100 / total).toInt()}%" else "—", C.Text, Modifier.weight(0.7f))
+                }
+                if (received > 0) Text("Also ${Money.fmt(received)} received in ${k.label}.", color = C.Mint, fontSize = 12.sp)
+                Text(vsLastMonth(spent, prev, k.label), color = if (spent > prev && prev > 0) C.Coral else C.Muted, fontSize = 12.sp)
+                Text("Showing only ${k.label} below.", color = C.Faint, fontSize = 12.sp)
+            }
         }
     }
 }
