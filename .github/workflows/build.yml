@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
@@ -43,9 +43,12 @@ jobs:
           name: Ledger-build-${{ github.run_number }}
           path: Ledger-build-${{ github.run_number }}.apk
 
+      # main → normal release "build-N" (latest). Other branches → pre-release "<branch>-N" for testing.
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Ledger build ${{ github.run_number }}
+          tag_name: ${{ github.ref_name == 'main' && format('build-{0}', github.run_number) || format('{0}-{1}', github.ref_name, github.run_number) }}
+          name: ${{ github.ref_name == 'main' && format('Ledger build {0}', github.run_number) || format('Ledger {0} (test) {1}', github.ref_name, github.run_number) }}
+          target_commitish: ${{ github.sha }}
           files: Ledger-build-${{ github.run_number }}.apk
-          make_latest: true
+          prerelease: ${{ github.ref_name != 'main' }}
+          make_latest: ${{ github.ref_name == 'main' }}
